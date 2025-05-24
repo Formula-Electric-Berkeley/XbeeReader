@@ -2,7 +2,7 @@ import serial
 
 
 ser = serial.Serial(
-    port='COM6',
+    port='/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A10NKEFQ-if00-port0',
     baudrate=115200,
     bytesize=serial.EIGHTBITS,
     parity=serial.PARITY_NONE,

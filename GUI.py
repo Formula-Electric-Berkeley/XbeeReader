@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QTabWidget
 )
 
-# Load CAN database
 try:
     dbc = cantools.database.load_file('FEB_CAN.dbc')
     print("Loaded DBC file with messages:")
@@ -19,7 +18,9 @@ except Exception as e:
     dbc = None
 
 class SerialCANReceiver(QObject):
-    new_message = Signal(int, int, bytes)  # msg_id, timestamp, raw_data
+    # Message has format of: 
+    # id, timestamp(idfk the units), raw_data
+    new_message = Signal(int, int, bytes)
 
     def __init__(self, port):
         super().__init__()
@@ -28,7 +29,7 @@ class SerialCANReceiver(QObject):
         self.initialize_serial()
 
         self.timer = QTimer()
-        self.timer.setInterval(10)  # Fast polling (10ms)
+        self.timer.setInterval(10)  # Arbitrary speed of 10ms, feel free to make faster
         self.timer.timeout.connect(self.read_serial_data)
         self.timer.start()
 
@@ -51,17 +52,15 @@ class SerialCANReceiver(QObject):
         if not self.serial or not self.serial.in_waiting:
             return None
 
-        # Wait for start delimiter
+        # this is just randomly what I got working 
         if self.serial.read(1) != b'\x7E':
             return None
 
-        # Read frame length
         length_bytes = self.serial.read(2)
         if len(length_bytes) < 2:
             return None
         length = int.from_bytes(length_bytes, byteorder='big')
 
-        # Read frame data
         frame_data = self.serial.read(length)
         if len(frame_data) < length:
             return None
@@ -69,7 +68,7 @@ class SerialCANReceiver(QObject):
         return frame_data
 
     def parse_xbee_frame(self, frame_data):
-        if not frame_data or frame_data[0] != 0x91:  # Explicit RX Indicator
+        if not frame_data or frame_data[0] != 0x91: # Make sure it's from our XBee and not random junk 
             return None
         return frame_data[18:].decode('utf-8', errors='ignore')
 
@@ -113,13 +112,12 @@ class BaseMessageView(QWidget):
         self.table.setWordWrap(True)
         self.table.verticalHeader().setVisible(False)
         
-        # Use monospace font and increase row height
+        # Font can be whatever you want, it just needs to be monospace
         font = self.table.font()
         font.setFamily("Courier New")
-        font.setPointSize(font.pointSize() + 1)  # Slightly larger font
+        font.setPointSize(font.pointSize() + 1) 
         self.table.setFont(font)
         
-        # Set style to increase line spacing
         self.table.setStyleSheet("""
             QTableWidget {
                 gridline-color: #c0c0c0;
@@ -132,7 +130,7 @@ class BaseMessageView(QWidget):
         
         layout = QVBoxLayout(self)
         layout.addWidget(self.table)
-        self.data = {}  # msg_id: (timestamp, display_data)
+        self.data = {}
 
     def update_message(self, msg_id, timestamp, display_data):
         self.data[msg_id] = (timestamp, display_data)
@@ -141,7 +139,7 @@ class BaseMessageView(QWidget):
     def refresh_table(self):
         self.table.setRowCount(len(self.data))
         for row, (msg_id, (timestamp, display_data)) in enumerate(sorted(self.data.items())):
-            # Get message name from dbc if available
+            # Get message name from dbc if its there
             msg_name = ""
             if dbc:
                 try:
@@ -149,14 +147,13 @@ class BaseMessageView(QWidget):
                     if msg:
                         msg_name = msg.name
                 except KeyError:
-                    pass  # No message found with this ID
+                    pass 
 
-            # Create ID text with name if available
             id_text = f"0x{msg_id:X}"
             if msg_name:
                 id_text += f"\n({msg_name})"
 
-            # Create items for each column
+
             id_item = QTableWidgetItem(id_text)
             id_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             
@@ -166,12 +163,10 @@ class BaseMessageView(QWidget):
             data_item = QTableWidgetItem(display_data)
             data_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-            # Set items in table
             self.table.setItem(row, 0, id_item)
             self.table.setItem(row, 1, time_item)
             self.table.setItem(row, 2, data_item)
 
-            # Set row height to accommodate multiple lines with spacing
             self.table.setRowHeight(row, self.fontMetrics().height() * (display_data.count('\n') + 2))
 
         self.table.resizeColumnToContents(0)
@@ -196,17 +191,13 @@ class InterpretedMessageView(BaseMessageView):
                 if message:
                     decoded = message.decode(raw_data)
                     
-                    # Convert all values to strings first
                     decoded_str = {k: str(v) for k, v in decoded.items()}
                     
-                    # Calculate maximum lengths for name and value columns
                     max_name_len = max(len(k) for k in decoded_str.keys())
                     max_value_len = max(len(v) for v in decoded_str.values())
                     
-                    # Format each signal with aligned columns
                     formatted_lines = []
                     for name, value in decoded_str.items():
-                        # Create aligned line (name left-aligned, value right-aligned)
                         line = f"{name.ljust(max_name_len)} : {value.rjust(max_value_len)}"
                         formatted_lines.append(line)
                     
@@ -244,8 +235,10 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    
-    # Use default port or command line argument
+
+    # skill issue if this serial port doesnt work on your computer 
+    # Idk how to do it for mac or windows 
+    # Ubuntu >>
     serial_port = '/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A10NKEFQ-if00-port0'
     if len(sys.argv) > 1:
         serial_port = sys.argv[1]
