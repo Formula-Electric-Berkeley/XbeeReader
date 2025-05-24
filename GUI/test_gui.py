@@ -10,6 +10,9 @@ from PySide6.QtWidgets import (
 # Load CAN database
 try:
     dbc = cantools.database.load_file('FEB_CAN.dbc')
+    print("Loaded DBC file with messages:")
+    for msg in dbc.messages:
+        print(f"ID: 0x{msg.frame_id:X}, Name: {msg.name}")
 except Exception as e:
     print(f"Error loading DBC file: {e}")
     dbc = None
@@ -55,20 +58,34 @@ class BaseMessageView(QWidget):
     def __init__(self):
         super().__init__()
         self.table = QTableWidget(0, 3)
-        # Set headers: ID, Timestamp, Latest Data (Latest Data rightmost)
         self.table.setHorizontalHeaderLabels(["ID", "Timestamp (ms)", "Latest Data"])
-        self.table.setWordWrap(True)  # Enable word wrap on whole table
-        self.table.verticalHeader().setVisible(False)  # Hide row numbers
-
+        self.table.setWordWrap(True)
+        self.table.verticalHeader().setVisible(False)
+        
+        # Use monospace font and increase row height
+        font = self.table.font()
+        font.setFamily("Courier New")
+        font.setPointSize(font.pointSize() + 1)  # Slightly larger font
+        self.table.setFont(font)
+        
+        # Set style to increase line spacing
+        self.table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #c0c0c0;
+            }
+            QTableWidget::item {
+                padding-top: 4px;
+                padding-bottom: 4px;
+            }
+        """)
+        
         layout = QVBoxLayout(self)
         layout.addWidget(self.table)
-
         self.data = {}  # msg_id: (timestamp, display_data)
 
     def update_message(self, msg_id, timestamp, display_data):
         self.data[msg_id] = (timestamp, display_data)
         self.refresh_table()
-
 
     def refresh_table(self):
         self.table.setRowCount(len(self.data))
@@ -95,9 +112,7 @@ class BaseMessageView(QWidget):
             time_item = QTableWidgetItem(str(timestamp))
             time_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
             
-            # Replace commas with newlines for multiline display
-            display_text = display_data.replace(", ", "\n").replace(",", "\n")
-            data_item = QTableWidgetItem(display_text)
+            data_item = QTableWidgetItem(display_data)
             data_item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
             # Set items in table
@@ -105,11 +120,12 @@ class BaseMessageView(QWidget):
             self.table.setItem(row, 1, time_item)
             self.table.setItem(row, 2, data_item)
 
-        self.table.resizeColumnToContents(0)  # ID
-        self.table.resizeColumnToContents(1)  # Timestamp
-        self.table.horizontalHeader().setStretchLastSection(True)  # Latest Data stretches
-        self.table.resizeRowsToContents()  # auto-expand row height for multiline text
+            # Set row height to accommodate multiple lines with spacing
+            self.table.setRowHeight(row, self.fontMetrics().height() * (display_data.count('\n') + 2))
 
+        self.table.resizeColumnToContents(0)
+        self.table.resizeColumnToContents(1)
+        self.table.horizontalHeader().setStretchLastSection(True)
 
 class RawMessageView(BaseMessageView):
     def process_message(self, msg_id, timestamp, raw_data):
@@ -128,15 +144,22 @@ class InterpretedMessageView(BaseMessageView):
                 message = dbc.get_message_by_frame_id(msg_id)
                 if message:
                     decoded = message.decode(raw_data)
-                    # Calculate maximum signal name length
-                    max_name_len = max(len(str(k)) for k in decoded.keys())
-                    # Format each signal with right-aligned values
-                    formatted_signals = []
-                    for name, value in decoded.items():
-                        # Pad the name with spaces to align values
-                        padded_name = f"{name}:".ljust(max_name_len + 1)
-                        formatted_signals.append(f"{padded_name} {value}")
-                    display_data = ", ".join(formatted_signals)
+                    
+                    # Convert all values to strings first
+                    decoded_str = {k: str(v) for k, v in decoded.items()}
+                    
+                    # Calculate maximum lengths for name and value columns
+                    max_name_len = max(len(k) for k in decoded_str.keys())
+                    max_value_len = max(len(v) for v in decoded_str.values())
+                    
+                    # Format each signal with aligned columns
+                    formatted_lines = []
+                    for name, value in decoded_str.items():
+                        # Create aligned line (name left-aligned, value right-aligned)
+                        line = f"{name.ljust(max_name_len)} : {value.rjust(max_value_len)}"
+                        formatted_lines.append(line)
+                    
+                    display_data = "\n".join(formatted_lines)
                 else:
                     display_data = " ".join(f"{b:02X}" for b in raw_data)
             except Exception as e:
@@ -150,6 +173,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("XBee CAN Reader")
+        self.resize(900, 600)
 
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -167,6 +191,5 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
-    window.resize(900, 600)
     window.show()
     sys.exit(app.exec())
