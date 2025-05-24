@@ -1,4 +1,5 @@
 import sys
+import serial
 import time
 import cantools
 from PySide6.QtCore import Qt, QTimer, Signal, QObject
@@ -17,42 +18,92 @@ except Exception as e:
     print(f"Error loading DBC file: {e}")
     dbc = None
 
-class MessageReceiver(QObject):
+class SerialCANReceiver(QObject):
     new_message = Signal(int, int, bytes)  # msg_id, timestamp, raw_data
 
-    def __init__(self):
+    def __init__(self, port):
         super().__init__()
-        self._index = 0
-        with open('sample_input.txt', 'r') as f:
-            self.lines = f.readlines()
+        self.port = port
+        self.serial = None
+        self.initialize_serial()
 
         self.timer = QTimer()
-        self.timer.setInterval(500)  # 500 ms = 0.5 seconds
-        self.timer.timeout.connect(self.emit_next)
+        self.timer.setInterval(10)  # Fast polling (10ms)
+        self.timer.timeout.connect(self.read_serial_data)
         self.timer.start()
 
-    def emit_next(self):
-        if self._index >= len(self.lines):
-            self._index = 0  # loop back to start for demo
-
-        line = self.lines[self._index].strip()
-        self._index += 1
-
-        # Expected format:
-        # --Message-- Time(ms): 43861, ID: 192, Data: 00 00 00 00 01 00 00 00
+    def initialize_serial(self):
         try:
-            parts = line.split(',')
-            timestamp_part = parts[0].split('Time(ms):')[1].strip()
-            id_part = parts[1].split('ID:')[1].strip()
-            data_part = parts[2].split('Data:')[1].strip()
-
-            timestamp = int(timestamp_part)
-            msg_id = int(id_part)
-            raw_data = bytes(int(b, 16) for b in data_part.split())
-
-            self.new_message.emit(msg_id, timestamp, raw_data)
+            self.serial = serial.Serial(
+                port=self.port,
+                baudrate=115200,
+                bytesize=serial.EIGHTBITS,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                timeout=0.1
+            )
+            print(f"Successfully connected to {self.port}")
         except Exception as e:
-            print(f"Failed to parse line: {line} with error: {e}")
+            print(f"Serial connection error: {e}")
+            self.serial = None
+
+    def read_frame(self):
+        if not self.serial or not self.serial.in_waiting:
+            return None
+
+        # Wait for start delimiter
+        if self.serial.read(1) != b'\x7E':
+            return None
+
+        # Read frame length
+        length_bytes = self.serial.read(2)
+        if len(length_bytes) < 2:
+            return None
+        length = int.from_bytes(length_bytes, byteorder='big')
+
+        # Read frame data
+        frame_data = self.serial.read(length)
+        if len(frame_data) < length:
+            return None
+
+        return frame_data
+
+    def parse_xbee_frame(self, frame_data):
+        if not frame_data or frame_data[0] != 0x91:  # Explicit RX Indicator
+            return None
+        return frame_data[18:].decode('utf-8', errors='ignore')
+
+    def parse_can_message(self, message_str):
+        try:
+            parts = [p.strip() for p in message_str.split(',')]
+            if len(parts) < 3:
+                return None
+
+            timestamp = int(parts[0].split('Time(ms):')[1])
+            msg_id = int(parts[1].split('ID:')[1])
+            hex_data = parts[2].split('Data:')[1].strip().split()
+            raw_data = bytes(int(b, 16) for b in hex_data)
+
+            return msg_id, timestamp, raw_data
+        except Exception as e:
+            print(f"Message parsing error: {e}")
+            return None
+
+    def read_serial_data(self):
+        if not self.serial:
+            return
+
+        frame = self.read_frame()
+        if not frame:
+            return
+
+        message_str = self.parse_xbee_frame(frame)
+        if not message_str:
+            return
+
+        can_data = self.parse_can_message(message_str)
+        if can_data:
+            self.new_message.emit(*can_data)
 
 class BaseMessageView(QWidget):
     def __init__(self):
@@ -170,26 +221,35 @@ class InterpretedMessageView(BaseMessageView):
         self.update_message(msg_id, timestamp, display_data)
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, serial_port):
         super().__init__()
-        self.setWindowTitle("XBee CAN Reader")
-        self.resize(900, 600)
+        self.setWindowTitle("CAN Message Viewer")
+        self.resize(1000, 700)
 
+        # Create tab interface
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
 
+        # Create message views
         self.raw_view = RawMessageView()
         self.interpreted_view = InterpretedMessageView()
-
         self.tabs.addTab(self.raw_view, "Raw Messages")
         self.tabs.addTab(self.interpreted_view, "Interpreted Messages")
 
-        self.receiver = MessageReceiver()
+        # Setup serial receiver
+        self.receiver = SerialCANReceiver(serial_port)
         self.receiver.new_message.connect(self.raw_view.process_message)
         self.receiver.new_message.connect(self.interpreted_view.process_message)
 
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = MainWindow()
+    
+    # Use default port or command line argument
+    serial_port = '/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A10NKEFQ-if00-port0'
+    if len(sys.argv) > 1:
+        serial_port = sys.argv[1]
+
+    window = MainWindow(serial_port)
     window.show()
     sys.exit(app.exec())
