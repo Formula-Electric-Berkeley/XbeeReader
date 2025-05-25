@@ -1,0 +1,9 @@
+PySide6==6.9.0
+PySide6_Addons==6.9.0
+PySide6_Essentials==6.9.0
+python-can==4.5.0
+python-qt-binding==1.1.2
+qt-dotgraph==2.2.3
+qt-gui==2.2.3
+qt-gui-cpp==2.2.3
+qt-gui-py-common==2.2.3
