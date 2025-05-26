@@ -1,28 +1,44 @@
 import serial
+
 def read_frame(ser):
-    # Wait for start delimiter
     while ser.read(1) != b'\x7E':
         pass
-    # Read length (2 bytes)
     length_bytes = ser.read(2)
     if len(length_bytes) < 2:
         return None
     frame_length = (length_bytes[0] << 8) + length_bytes[1]
-    # Read the frame data
     frame_data = ser.read(frame_length)
     if len(frame_data) < frame_length:
         return None
-    # Read checksum (1 byte)
-    checksum = ser.read(1)
-    # Return the entire frame (excluding start delimiter and length)
+    _ = ser.read(1)  # Discard the checksum
     return frame_data
+
 def extract_rf_data(frame):
-    # Frame type 0x91 = Explicit RX Indicator
     if frame[0] != 0x91:
         return None
-    # RF data starts at byte 18 (index 17 since Python is 0-based)
-    rf_data = frame[18:-1]  # Exclude checksum if included
+    rf_data = frame[18:-1]  # Skip everything before RF data, discard frame checksum
     return rf_data
+
+def parse_rf_data(rf_data):
+    if len(rf_data) != 16:
+        return None
+
+    # Extract timestamp (bytes 0-3)
+    timestamp = int.from_bytes(rf_data[0:4], byteorder='big')
+
+    # Extract CAN ID (bytes 4-7)
+    can_id = int.from_bytes(rf_data[4:8], byteorder='big')
+
+    # Extract data (bytes 8-15)
+    data_bytes = rf_data[8:16]
+
+    return {
+        "timestamp": timestamp,
+        "can_id": can_id,
+        "data_bytes": data_bytes
+    }
+
+
 def main():
     ser = serial.Serial(
         port='/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A10NKEFQ-if00-port0',
@@ -39,13 +55,14 @@ def main():
             if frame:
                 rf_data = extract_rf_data(frame)
                 if rf_data:
-                    try:
-                        print("RF Data (HEX):", rf_data.hex())
-                    except Exception as e:
-                        print("Error decoding RF data:", e)
+                    result = parse_rf_data(rf_data)
+                    if result:
+                        print(f"Timestamp: {result['timestamp']} | CAN ID: 0x{result['can_id']:08X} | Data: {result['data_bytes'].hex()}")
+
     except KeyboardInterrupt:
         print("\nExiting...")
     finally:
         ser.close()
+
 if __name__ == "__main__":
     main()

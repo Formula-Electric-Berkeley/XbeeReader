@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QTabWidget, QHeaderView, QPushButton, QHBoxLayout
 )
-
+from serial_reciever import SerialCANReceiver
 
 # Load DBC file
 try:
@@ -18,89 +18,6 @@ except Exception as e:
     print(f"Error loading DBC file: {e}")
     dbc = None
 
-class SerialCANReceiver(QObject):
-    new_message = Signal(int, int, bytes)  # msg_id, timestamp, raw_data
-
-    def __init__(self, port):
-        super().__init__()
-        self.port = port
-        self.serial = None
-        self.initialize_serial()
-
-        self.timer = QTimer()
-        self.timer.setInterval(1)  # Fast polling (1ms)
-        self.timer.timeout.connect(self.read_serial_data)
-        self.timer.start()
-
-    def initialize_serial(self):
-        try:
-            self.serial = serial.Serial(
-                port=self.port,
-                baudrate=230400,
-                bytesize=serial.EIGHTBITS,
-                parity=serial.PARITY_NONE,
-                stopbits=serial.STOPBITS_ONE,
-                timeout=0.1
-            )
-            print(f"Connected to {self.port}")
-        except Exception as e:
-            print(f"Serial error: {e}")
-            self.serial = None
-
-    def read_frame(self):
-        if not self.serial or not self.serial.in_waiting:
-            return None
-
-        if self.serial.read(1) != b'\x7E':
-            return None
-
-        length_bytes = self.serial.read(2)
-        if len(length_bytes) < 2:
-            return None
-        length = int.from_bytes(length_bytes, byteorder='big')
-
-        frame_data = self.serial.read(length)
-        if len(frame_data) < length:
-            return None
-
-        return frame_data
-
-    def parse_xbee_frame(self, frame_data):
-        if not frame_data or frame_data[0] != 0x91:
-            return None
-        return frame_data[18:].decode('utf-8', errors='ignore')
-
-    def parse_can_message(self, message_str):
-        try:
-            parts = [p.strip() for p in message_str.split(',')]
-            if len(parts) < 3:
-                return None
-
-            timestamp = int(parts[0].split('Time(ms):')[1])
-            msg_id = int(parts[1].split('ID:')[1])
-            hex_data = parts[2].split('Data:')[1].strip().split()
-            raw_data = bytes(int(b, 16) for b in hex_data if b)
-
-            return msg_id, timestamp, raw_data
-        except Exception as e:
-            print(f"Parse error: {e}")
-            return None
-
-    def read_serial_data(self):
-        if not self.serial:
-            return
-
-        frame = self.read_frame()
-        if not frame:
-            return
-
-        message_str = self.parse_xbee_frame(frame)
-        if not message_str:
-            return
-
-        can_data = self.parse_can_message(message_str)
-        if can_data:
-            self.new_message.emit(*can_data)
 
 class BaseMessageView(QWidget):
     def __init__(self):
@@ -268,6 +185,8 @@ class InterpretedMessageView(BaseMessageView):
                     display_data = " ".join(f"{b:02X}" for b in raw_data)
             except Exception as e:
                 display_data = f"Decode error: {e}"
+                print("DECODE ERROR: ", e)
+                print("RAW DATA: ", raw_data)
 
         self.update_message(msg_id, timestamp, display_data)
 
@@ -288,6 +207,12 @@ class MainWindow(QMainWindow):
         self.receiver = SerialCANReceiver(serial_port)
         self.receiver.new_message.connect(self.raw_view.process_message)
         self.receiver.new_message.connect(self.interpreted_view.process_message)
+        self.receiver.start()  # Start the receiver
+
+    def closeEvent(self, event):
+        """Handle window close event to clean up the receiver"""
+        self.receiver.stop()
+        super().closeEvent(event)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

@@ -1,107 +1,108 @@
-import sys
 import serial
-import cantools
-from PySide6.QtCore import Qt, QTimer, Signal, QObject
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QTabWidget, QHeaderView, QPushButton, QHBoxLayout
-)
+from PySide6.QtCore import QObject, Signal, QThread
+
 class SerialCANReceiver(QObject):
-    new_message = Signal(int, int, bytes)  # msg_id, timestamp, raw_data
-
-    def __init__(self, port):
+    new_message = Signal(int, int, bytes)  # can_id, timestamp, data_bytes
+    
+    def __init__(self, serial_port):
         super().__init__()
-        self.port = port
+        self.serial_port = serial_port
         self.serial = None
-        self.initialize_serial()
+        self.running = False
+        self.thread = QThread()
+        self.moveToThread(self.thread)
+        self.thread.started.connect(self.run)
 
-        self.timer = QTimer()
-        self.timer.setInterval(1)  # Fast polling (1ms)
-        self.timer.timeout.connect(self.read_serial_data)
-        self.timer.start()
-
-    def initialize_serial(self):
+    def start(self):
         try:
             self.serial = serial.Serial(
-                port=self.port,
+                port=self.serial_port,
                 baudrate=230400,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
-                timeout=0.1
+                timeout=1
             )
-            print(f"Connected to {self.port}")
+            self.running = True
+            self.thread.start()
         except Exception as e:
-            print(f"Serial error: {e}")
-            self.serial = None
+            print(f"Error opening serial port: {e}")
+
+    def stop(self):
+        self.running = False
+        if self.thread.isRunning():
+            self.thread.quit()
+            self.thread.wait()
+        if self.serial and self.serial.is_open:
+            self.serial.close()
+
+    def run(self):
+        print("SerialCANReceiver started")
+        while self.running:
+            try:
+                frame = self.read_frame()
+                if frame:
+                    rf_data = self.extract_rf_data(frame)
+                    if rf_data:
+                        result = self.parse_rf_data(rf_data)
+                        if result:
+                            self.new_message.emit(
+                                result['can_id'],
+                                result['timestamp'],
+                                result['data_bytes']
+                            )
+            except Exception as e:
+                print(f"Error in serial receiver: {e}")
+                # Continue running unless it's a critical error
 
     def read_frame(self):
-        if not self.serial or not self.serial.in_waiting:
-            return None
-
-        if self.serial.read(1) != b'\x7E':
-            return None
-
-        length_bytes = self.serial.read(2)
-        if len(length_bytes) < 2:
-            return None
-        length = int.from_bytes(length_bytes, byteorder='big')
-
-        frame_data = self.serial.read(length)
-        if len(frame_data) < length:
-            return None
-
-        return frame_data
-
-    def parse_xbee_frame(self, frame_data):
-        if not frame_data or frame_data[0] != 0x91:
-            return None
-        return frame_data[18:].decode('utf-8', errors='ignore')
-
-    def parse_can_message(self, message_str):
-        try:
-            parts = [p.strip() for p in message_str.split(',')]
-            if len(parts) < 3:
+        """Read a complete frame from the serial port"""
+        while self.running:
+            # Find frame start
+            while self.running:
+                byte = self.serial.read(1)
+                if byte == b'\x7E':
+                    break
+            
+            # Read length
+            length_bytes = self.serial.read(2)
+            if len(length_bytes) < 2:
                 return None
+            
+            frame_length = (length_bytes[0] << 8) + length_bytes[1]
+            frame_data = self.serial.read(frame_length)
+            if len(frame_data) < frame_length:
+                return None
+            
+            _ = self.serial.read(1)  # Discard checksum
+            return frame_data
 
-            timestamp = int(parts[0].split('Time(ms):')[1])
-            msg_id = int(parts[1].split('ID:')[1])
-            hex_data = parts[2].split('Data:')[1].strip().split()
-            raw_data = bytes(int(b, 16) for b in hex_data if b)
+    @staticmethod
+    def extract_rf_data(frame):
+        """Extract RF data from frame"""
+        if len(frame) < 1 or frame[0] != 0x91:
+            return None
+        if len(frame) < 19:  # Need at least 18 bytes to skip + 1 for checksum
+            return None
+        return frame[18:-1]  # Skip everything before RF data, discard frame checksum
 
-            return msg_id, timestamp, raw_data
-        except Exception as e:
-            print(f"Parse error: {e}")
+    @staticmethod
+    def parse_rf_data(rf_data):
+        """Parse RF data into timestamp, CAN ID, and data bytes"""
+        if len(rf_data) != 16:
             return None
 
-    def read_serial_data(self):
-        if not self.serial:
-            return
+        # Extract timestamp (bytes 0-3)
+        timestamp = int.from_bytes(rf_data[0:4], byteorder='big')
 
-        frame = self.read_frame()
-        if not frame:
-            return
-        
-        print("FRAME: ", frame)
-        message_str = self.parse_xbee_frame(frame)
-        if not message_str:
-            return
+        # Extract CAN ID (bytes 4-7)
+        can_id = int.from_bytes(rf_data[4:8], byteorder='big')
 
-        can_data = self.parse_can_message(message_str)
-        if can_data:
-            self.new_message.emit(*can_data)
-class TestReceiver(QObject):
-    def __init__(self):
-        super().__init__()
-        # Replace with the actual path to your serial port
-        port = '/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A10NKEFQ-if00-port0'
-        self.receiver = SerialCANReceiver(port)
-        self.receiver.new_message.connect(self.handle_new_message)
+        # Extract data (bytes 8-15)
+        data_bytes = rf_data[8:16]
 
-    def handle_new_message(self, msg_id, timestamp, raw_data):
-        print(f"Received: ID={msg_id}, Time={timestamp}, Data={raw_data.hex()}")
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    test = TestReceiver()
-    sys.exit(app.exec())
+        return {
+            "timestamp": timestamp,
+            "can_id": can_id,
+            "data_bytes": data_bytes
+        }
