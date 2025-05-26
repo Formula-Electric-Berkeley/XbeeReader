@@ -7,3 +7,4 @@ qt-dotgraph==2.2.3
 qt-gui==2.2.3
 qt-gui-cpp==2.2.3
 qt-gui-py-common==2.2.3
+pyserial
