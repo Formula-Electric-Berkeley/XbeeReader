@@ -11,6 +11,8 @@ from serial_reciever import SerialCANReceiver
 # Load DBC file
 try:
     dbc = cantools.database.load_file('FEB_CAN.dbc')
+    dbc.add_dbc_file('ivts.dbc')
+    dbc.add_dbc_file('inverter.dbc')
     print("Loaded DBC file with messages:")
     for msg in dbc.messages:
         print(f"ID: 0x{msg.frame_id:03X}, Name: {msg.name}")
@@ -18,6 +20,24 @@ except Exception as e:
     print(f"Error loading DBC file: {e}")
     dbc = None
 
+# if dbc:
+#     try:
+#         dbc2 = cantools.database.load_file('ivts.dbc')
+#         print("\nLoaded secondary DBC file:")
+#         for msg in dbc2.messages:
+#             print(f"ID: 0x{msg.frame_id:03X}, Name: {msg.name}")
+#             dbc.add_message(msg)  # Append the message to the first DBC
+#     except Exception as e:
+#         print(f"Error loading secondary DBC: {e}")
+
+# try:
+#     dbc2 = cantools.database.load_file('inverter.dbc')
+#     print("\nLoaded secondary DBC file:")
+#     for msg in dbc2.messages:
+#         print(f"ID: 0x{msg.frame_id:03X}, Name: {msg.name}")
+#         dbc.add_message(msg)  # Append the message to the first DBC
+# except Exception as e:
+#     print(f"Error loading secondary DBC: {e}")
 
 class BaseMessageView(QWidget):
     def __init__(self):

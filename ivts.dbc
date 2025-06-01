@@ -1,0 +1,57 @@
+VERSION "Mar 12, 2020"
+
+
+NS_ : 
+	NS_DESC_
+	CM_
+	BA_DEF_
+	BA_
+	VAL_
+	CAT_DEF_
+	CAT_
+	FILTER
+	BA_DEF_DEF_
+	EV_DATA_
+	ENVVAR_DATA_
+	SGTYPE_
+	SGTYPE_VAL_
+	BA_DEF_SGTYPE_
+	BA_SGTYPE_
+	SIG_TYPE_REF_
+	VAL_TABLE_
+	SIG_GROUP_
+	SIG_VALTYPE_
+	SIGTYPE_VALTYPE_
+	BO_TX_BU_
+	BA_DEF_REL_
+	BA_REL_
+	BA_DEF_DEF_REL_
+	BU_SG_REL_
+	BU_EV_REL_
+	BU_BO_REL_
+	SG_MUL_VAL_
+
+BS_:
+
+BU_: IVTs
+
+
+BO_ 1313 MSG_0x521: 6 IVTs
+ SG_ Current : 23|32@0- (-0.001,0) [0|4294.967295] "Amps" Vector__XXX
+
+BO_ 1314 MSG_0x522: 6 IVTs
+ SG_ Voltage_U1 : 23|32@0+ (0.001,0) [0|4294.967295] "Volts" Vector__XXX
+
+BO_ 1315 MSG_0x523: 6 IVTs
+ SG_ Voltage_U2 : 23|32@0+ (1E-06,0) [0|4294.967295] "Volts" Vector__XXX
+
+BO_ 1316 MSG_0x524: 6 IVTs
+ SG_ Voltage_U3 : 23|32@0+ (1E-06,0) [0|4294.967295] "Volts" Vector__XXX
+
+
+
+BA_DEF_ BO_  "DBC_Author" STRING ;
+BA_DEF_ BO_  "DBC_Author_Contact" STRING ;
+BA_DEF_DEF_  "DBC_Author" "AEM_Performance_Electronics";
+BA_DEF_DEF_  "DBC_Author_Contact" "CANbusInfo@AEMelectronics.com";
+
